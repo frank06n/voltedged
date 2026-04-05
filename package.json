@@ -21,8 +21,10 @@
     "babel-loader": "8.2.4",
     "babel-plugin-named-asset-import": "^0.3.8",
     "babel-preset-react-app": "^10.0.1",
+    "baseline-browser-mapping": "^2.10.7",
     "bfj": "^7.0.2",
     "camelcase": "^6.3.0",
+    "caniuse-lite": "^1.0.30001778",
     "case-sensitive-paths-webpack-plugin": "2.4.0",
     "classnames": "^2.3.1",
     "css-loader": "4.3.0",
@@ -79,9 +81,9 @@
     "workbox-webpack-plugin": "5.1.4"
   },
   "scripts": {
-    "start": "node scripts/start.js",
-    "build": "node scripts/build.js",
-    "test": "node scripts/test.js",
+    "start": "cross-env NODE_OPTIONS=--openssl-legacy-provider node scripts/start.js",
+    "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider node scripts/build.js",
+    "test": "cross-env NODE_OPTIONS=--openssl-legacy-provider node scripts/test.js",
     "bump": "ncu -u -t minor"
   },
   "eslintConfig": {
@@ -158,5 +160,8 @@
     "presets": [
       "react-app"
     ]
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
   }
 }
