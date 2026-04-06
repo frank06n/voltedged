@@ -13,7 +13,7 @@ export default class MainMenuScene extends Scene {
         const fontSize = 24;
         const { width: gameWidth, height: gameHeight } = this.cameras.main;
 
-        const gameOverText = this.add.text(
+        this.add.text(
             gameWidth / 2,
             Math.ceil(gameHeight / 5),
             'game over',

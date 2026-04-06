@@ -33,6 +33,7 @@ export default class MainMenuScene extends Scene {
         const gameMenuSelectedEventListener = ({ detail }) => {
             switch (detail.selectedItem) {
                 case 'start': {
+                    const contestSession = window.__CONTEST_SESSION__ || null;
                     this.scene.start('GameScene', {
                         heroStatus: {
                             position: { x: 4, y: 3 },
@@ -46,6 +47,7 @@ export default class MainMenuScene extends Scene {
                             haveSword: false,
                         },
                         mapKey: 'home_page_city_house_01',
+                        contestSession,
                     });
                     break;
                 }

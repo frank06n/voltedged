@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Phaser from 'phaser';
 import GridEngine from 'grid-engine';
 import BootScene from './game/scenes/BootScene';
@@ -6,15 +6,16 @@ import MainMenuScene from './game/scenes/MainMenuScene';
 import GameOverScene from './game/scenes/GameOverScene';
 import GameScene from './game/scenes/GameScene';
 import { makeStyles } from '@material-ui/core/styles';
-import classNames from 'classnames';
-import { Backdrop, Fade, Modal, Typography } from '@material-ui/core';
+import { Button, TextField, Typography } from '@material-ui/core';
 import dialogBorderBox from './game/assets/images/dialog_borderbox.png';
 import GameMenu from "./game/GameMenu";
 import DialogBox from "./game/DialogBox";
 import HeroCoin from "./game/HeroCoin";
 import HeroHealth from "./game/HeroHealth";
+import RiddlePopup from './game/RiddlePopup';
 import './App.css';
 import { calculateGameSize } from "./game/utils";
+import { bootstrapContestSession, loadContestState } from './game/contest/contestState';
 
 const { width, height, multiplier } = calculateGameSize();
 
@@ -56,6 +57,23 @@ const useStyles = makeStyles((theme) => ({
     fontFamily: '"Press Start 2P"',
     marginTop: '30px',
     marginLeft: '30px',
+  },
+  contestBar: {
+    fontFamily: '"Press Start 2P"',
+    padding: '8px 12px',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'rgba(0,0,0,0.85)',
+    color: '#fff',
+    fontSize: '10px',
+  },
+  contestField: {
+    '& .MuiInputBase-input': {
+      fontFamily: '"Press Start 2P"',
+      fontSize: '10px',
+    },
   },
   preLoadDialogImage: {
     backgroundImage: `url("${dialogBorderBox}")`,
@@ -112,6 +130,24 @@ function App() {
   const [gameMenuPosition, setGameMenuPosition] = useState('center');
   const [heroHealthStates, setHeroHealthStates] = useState([]);
   const [heroCoins, setHeroCoins] = useState(null);
+  const [accessCodeInput, setAccessCodeInput] = useState('DEMO');
+  const [accessMsg, setAccessMsg] = useState('');
+  const [contestReady, setContestReady] = useState(false);
+  const [riddlePayload, setRiddlePayload] = useState(null);
+
+  const handleContestBootstrap = useCallback(async () => {
+    setAccessMsg('');
+    try {
+      const { config, state } = await bootstrapContestSession(accessCodeInput);
+      window.__CONTEST_SESSION__ = { accessCode: state.accessCode, config };
+      setContestReady(true);
+      setAccessMsg('Session ready — start the game from the menu.');
+    } catch (e) {
+      setContestReady(false);
+      window.__CONTEST_SESSION__ = undefined;
+      setAccessMsg(e.message || 'Could not start contest session.');
+    }
+  }, [accessCodeInput]);
 
   const handleMessageIsDone = useCallback(() => {
     const customEvent = new CustomEvent(`${characterName}-dialog-finished`, {
@@ -135,7 +171,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const game = new Phaser.Game({
+    const restore = async () => {
+      const prev = loadContestState();
+      if (!prev?.accessCode) {
+        return;
+      }
+      setAccessCodeInput(prev.accessCode);
+      try {
+        const { config, state } = await bootstrapContestSession(prev.accessCode);
+        window.__CONTEST_SESSION__ = { accessCode: state.accessCode, config };
+        setContestReady(true);
+        setAccessMsg('Restored session from browser storage.');
+      } catch {
+        window.__CONTEST_SESSION__ = undefined;
+      }
+    };
+    restore();
+  }, []);
+
+  useEffect(() => {
+    new Phaser.Game({
       type: Phaser.AUTO,
       title: 'some-game-title',
       parent: 'game-content',
@@ -207,12 +262,60 @@ function App() {
     };
   }, [setCharacterName, setMessages]);
 
+  useEffect(() => {
+    const openRiddle = ({ detail }) => {
+      setRiddlePayload(detail || null);
+    };
+    window.addEventListener('open-station-riddle', openRiddle);
+    return () => window.removeEventListener('open-station-riddle', openRiddle);
+  }, []);
+
+  useEffect(() => {
+    if (!riddlePayload) {
+      return;
+    }
+    const canvas = document.querySelector('#game-content canvas');
+    canvas?.blur();
+  }, [riddlePayload]);
+
   return (
       <div>
+        <div className={classes.contestBar}>
+          <Typography component="span" variant="body2">
+            Contest access code
+          </Typography>
+          <TextField
+              className={classes.contestField}
+              size="small"
+              variant="outlined"
+              value={accessCodeInput}
+              onChange={(e) => setAccessCodeInput(e.target.value)}
+              placeholder="DEMO"
+          />
+          <Button
+              size="small"
+              color="primary"
+              variant="contained"
+              onClick={handleContestBootstrap}
+          >
+            Enter contest
+          </Button>
+          {accessMsg ? (
+              <Typography component="span" variant="body2">
+                {accessMsg}
+              </Typography>
+          ) : null}
+          {contestReady ? (
+              <Typography component="span" variant="body2">
+                (E or Enter at a station)
+              </Typography>
+          ) : null}
+        </div>
         <div className={classes.gameWrapper}>
           <div
               id="game-content"
               className={classes.gameContentWrapper}
+              style={riddlePayload ? { pointerEvents: 'none' } : undefined}
           >
             {/* this is where the game canvas will be rendered */}
           </div>
@@ -260,6 +363,15 @@ function App() {
                   onSelected={handleMenuItemSelected}
               />
           )}
+          <RiddlePopup
+              open={Boolean(riddlePayload)}
+              onClose={() => setRiddlePayload(null)}
+              stationId={riddlePayload?.stationId}
+              title={riddlePayload?.title}
+              prompt={riddlePayload?.prompt}
+              accessCode={riddlePayload?.accessCode}
+              rewardComponentType={riddlePayload?.rewardComponentType}
+          />
         </div>
       </div>
   );

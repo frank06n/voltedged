@@ -4,19 +4,19 @@ overview: Phased contest work aligned with docs/CONTEST_GAME_PHASED_SPEC.md. Pha
 todos:
   - id: phase-0-maps
     content: "Phase 0: Contest map(s) — multi-room single level; actions objects use stationId; placement zone via contest_placeable tile property (or equivalent); preload in BootScene; MainMenuScene mapKey; optional docs/TILED_CONTEST.md legend"
-    status: pending
+    status: completed
   - id: phase-1-bootstrap-api
     content: "Phase 1 (spec): mockContestBackend.js — POST /contest/bootstrap + /validate-answer; access code UI; no contestRiddles.json as source of truth"
-    status: pending
+    status: completed
   - id: phase-1-phaser-station
     content: "Phase 1 (spec): GameScene — E key; actions case stationId (not riddleId); filter by activeStationIds from config; open-riddle with stationId + prompt from bootstrap"
-    status: pending
+    status: completed
   - id: phase-1-riddle-popup
     content: "Phase 1 (spec): RiddlePopup calls /validate-answer; on valid append componentHash to inventory/localStorage per spec (not client-side acceptableAnswers list)"
-    status: pending
+    status: completed
   - id: docs-architecture
     content: Update docs/GAME_ARCHITECTURE.md with contest events, stationId, and pointer to CONTEST_GAME_PHASED_SPEC.md
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -35,7 +35,7 @@ This file started as a **riddle-only prototype** plan (`riddleId`, local `contes
 ### Goals
 
 - **Multi-room, one level** — either linked Tiled maps + teleports (existing pattern) or one map with disjoint regions.
-- **Station markers** — object layer `**actions`**, custom property `**stationId**` (string, unique per kiosk). Do **not** use `riddleId` in new maps.
+- **Station markers** — object layer `**actions`**, custom property `**stationId`** (string, unique per kiosk). Do **not** use `riddleId` in new maps.
 - **Placement zone** — tiles (or layer) queryable in Phaser for “may place component here”, e.g. tile property `**contest_placeable: true`**, or an object layer you merge at runtime. Required before Phase 4 placement code; authoring happens in Phase 0.
 
 ### Deliverables
@@ -87,7 +87,7 @@ The following described a **minimal** vertical slice **without** access code, **
 
 ### A.2 Old Tiled property (superseded)
 
-- ~~`riddleId`~~ → use `**stationId**`; prompts from `**/contest/bootstrap**`.
+- ~~`riddleId`~~ → use `**stationId`**; prompts from `**/contest/bootstrap`**.
 
 ### A.3 Old win condition (superseded)
 

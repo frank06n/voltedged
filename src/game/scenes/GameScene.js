@@ -8,6 +8,7 @@ import {
     NPC_MOVEMENT_RANDOM,
     SCENE_FADE_TIME,
 } from '../constants';
+import { isTileContestPlaceable } from '../contest/contestPlaceableBounds';
 
 export default class GameScene extends Scene {
     constructor() {
@@ -21,9 +22,53 @@ export default class GameScene extends Scene {
     isShowingDialog = false;
     isTeleporting = false;
     isAttacking = false;
+    contestInputFrozen = false;
 
     init(data) {
         this.initData = data;
+    }
+
+    wasInteractPressed() {
+        return Input.Keyboard.JustDown(this.enterKey) || Input.Keyboard.JustDown(this.interactKey);
+    }
+
+    freezeContestInput() {
+        if (this.contestInputFrozen) {
+            return;
+        }
+        this.contestInputFrozen = true;
+        if (this.input) {
+            this.input.enabled = false;
+        }
+        if (this.input?.keyboard) {
+            this.input.keyboard.enabled = false;
+        }
+    }
+
+    unfreezeContestInput() {
+        if (!this.contestInputFrozen) {
+            return;
+        }
+        this.contestInputFrozen = false;
+        if (this.input) {
+            this.input.enabled = true;
+        }
+        if (this.input?.keyboard) {
+            this.input.keyboard.enabled = true;
+        }
+    }
+
+    /**
+     * @param {number} worldX
+     * @param {number} worldY
+     */
+    isWorldXYContestPlaceable(worldX, worldY) {
+        if (!this.map) {
+            return false;
+        }
+        const tx = this.map.worldToTileX(worldX);
+        const ty = this.map.worldToTileY(worldY);
+        return isTileContestPlaceable(this.contestMapKey, tx, ty);
     }
 
     calculatePreviousTeleportPosition() {
@@ -340,12 +385,11 @@ export default class GameScene extends Scene {
         const camera = this.cameras.main;
         const { game } = this.sys;
         const isDebugMode = this.physics.config.debug;
-        const { heroStatus, mapKey } = this.initData;
+        const { heroStatus, mapKey, contestSession } = this.initData;
+        this.contestSession = contestSession || null;
         const {
             position: initialPosition,
             frame: initialFrame,
-            facingDirection: initialFacingDirection,
-            previousPosition,
             health: heroHealth,
             maxHealth: heroMaxHealth,
             coin: heroCoin,
@@ -356,6 +400,7 @@ export default class GameScene extends Scene {
         camera.fadeIn(SCENE_FADE_TIME);
 
         this.enterKey = this.input.keyboard.addKey(Input.Keyboard.KeyCodes.ENTER);
+        this.interactKey = this.input.keyboard.addKey(Input.Keyboard.KeyCodes.E);
         this.spaceKey = this.input.keyboard.addKey(Input.Keyboard.KeyCodes.SPACE);
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys({
@@ -371,8 +416,9 @@ export default class GameScene extends Scene {
 
         if (isDebugMode) {
             window.phaserGame = game;
-            this.map = map;
         }
+        this.map = map;
+        this.contestMapKey = mapKey;
 
         // Hero
         this.heroSprite = this.physics.add
@@ -489,7 +535,9 @@ export default class GameScene extends Scene {
         const elementsLayers = this.add.group();
         for (let i = 0; i < map.layers.length; i++) {
             const layer = map.createLayer(i, 'tileset', 0, 0);
-            layer.layer.properties.forEach((property) => {
+            const layerData = layer.layer;
+            const props = layerData.properties || [];
+            props.forEach((property) => {
                 const { value, name } = property;
 
                 if (name === 'type' && value === 'elements') {
@@ -500,13 +548,18 @@ export default class GameScene extends Scene {
             this.physics.add.collider(this.heroSprite, layer);
         }
 
+        if (isDebugMode && isTileContestPlaceable(mapKey, 7, 7)) {
+            // eslint-disable-next-line no-console
+            console.log('[contest] tile (7,7) is inside code-defined contest placeable rect');
+        }
+
         const npcsKeys = [];
         const dataLayer = map.getObjectLayer('actions');
         dataLayer.objects.forEach((data) => {
             const { properties, x, y } = data;
 
             properties.forEach((property) => {
-                const { name, type, value } = property;
+                const { name, value } = property;
 
                 switch (name) {
                     case 'dialog': {
@@ -525,7 +578,7 @@ export default class GameScene extends Scene {
                                 return;
                             }
 
-                            if (Input.Keyboard.JustDown(this.enterKey)) {
+                            if (this.wasInteractPressed()) {
                                 const characterName = value;
                                 const customEvent = new CustomEvent('new-dialog', {
                                     detail: {
@@ -542,6 +595,7 @@ export default class GameScene extends Scene {
 
                                     // just to consume the JustDown
                                     Input.Keyboard.JustDown(this.enterKey);
+                                    Input.Keyboard.JustDown(this.interactKey);
                                     Input.Keyboard.JustDown(this.spaceKey);
 
                                     this.time.delayedCall(100, () => {
@@ -555,6 +609,55 @@ export default class GameScene extends Scene {
 
                                 this.isShowingDialog = true;
                             }
+                        });
+
+                        break;
+                    }
+
+                    case 'stationId': {
+                        const stationId = value;
+                        const customCollider = createInteractiveGameObject(
+                            this,
+                            x,
+                            y,
+                            16,
+                            16,
+                            'station',
+                            isDebugMode
+                        );
+
+                        this.physics.add.overlap(this.heroActionCollider, customCollider, () => {
+                            if (this.isShowingDialog) {
+                                return;
+                            }
+
+                            const cfg = this.contestSession?.config;
+                            const active = cfg?.activeStationIds?.includes(stationId);
+                            if (!active || !this.contestSession?.accessCode) {
+                                return;
+                            }
+
+                            if (!this.wasInteractPressed()) {
+                                return;
+                            }
+
+                            const stationMeta = cfg?.stations?.[stationId];
+                            if (!stationMeta) {
+                                return;
+                            }
+
+                            const customEvent = new CustomEvent('open-station-riddle', {
+                                detail: {
+                                    stationId,
+                                    title: stationMeta.title || stationId,
+                                    prompt: stationMeta.prompt || '',
+                                    accessCode: this.contestSession.accessCode,
+                                    rewardComponentType: stationMeta.rewardComponentType || 'unknown',
+                                },
+                            });
+                            window.dispatchEvent(customEvent);
+                            this.freezeContestInput();
+                            this.isShowingDialog = true;
                         });
 
                         break;
@@ -714,6 +817,7 @@ export default class GameScene extends Scene {
                                             haveSword: this.heroSprite.haveSword,
                                         },
                                         mapKey: teleportToMapKey,
+                                        contestSession: this.contestSession,
                                     });
                                 }
                             );
@@ -727,6 +831,20 @@ export default class GameScene extends Scene {
                     }
                 }
             });
+        });
+
+        this.onStationRiddleClosed = () => {
+            this.unfreezeContestInput();
+            this.time.delayedCall(100, () => {
+                this.isShowingDialog = false;
+            });
+            Input.Keyboard.JustDown(this.enterKey);
+            Input.Keyboard.JustDown(this.interactKey);
+        };
+        window.addEventListener('station-riddle-closed', this.onStationRiddleClosed);
+        this.events.once('shutdown', () => {
+            window.removeEventListener('station-riddle-closed', this.onStationRiddleClosed);
+            this.unfreezeContestInput();
         });
 
         camera.startFollow(this.heroSprite, true);
@@ -1004,9 +1122,7 @@ export default class GameScene extends Scene {
         // enemies
         enemiesData.forEach((enemyData) => {
             const {
-                enemyAI,
                 enemyName,
-                speed,
             } = enemyData;
 
             this.gridEngine.moveRandomly(enemyName, 1000, 4);
@@ -1186,7 +1302,7 @@ export default class GameScene extends Scene {
 
             const npc = [objA, objB].find((obj) => obj !== this.heroActionCollider);
 
-            if (Input.Keyboard.JustDown(this.enterKey)) {
+            if (this.wasInteractPressed()) {
                 if (this.gridEngine.isMoving(npc.texture.key)) {
                     return;
                 }
@@ -1205,6 +1321,7 @@ export default class GameScene extends Scene {
 
                     // just to consume the JustDown
                     Input.Keyboard.JustDown(this.enterKey);
+                    Input.Keyboard.JustDown(this.interactKey);
                     Input.Keyboard.JustDown(this.spaceKey);
 
                     this.time.delayedCall(100, () => {

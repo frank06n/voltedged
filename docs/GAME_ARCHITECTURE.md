@@ -77,6 +77,7 @@ All cross-boundary traffic uses **`window.dispatchEvent` / `addEventListener`**.
 | `menu-items` | Main menu or game over menu shown | `{ menuItems: string[], menuPosition: 'center' \| 'left' }` |
 | `hero-health` | Health changes / death | `{ healthStates: ('full'\|'half'\|'empty')[] }` — empty array hides HUD |
 | `hero-coin` | Coin changes / death | `{ heroCoins: number \| null }` — `null` hides HUD |
+| `open-station-riddle` | Contest: hero overlaps an **active** `stationId` and presses **E** or **Enter** | `{ stationId, title, prompt, accessCode, rewardComponentType }` — see [CONTEST_GAME_PHASED_SPEC.md](./CONTEST_GAME_PHASED_SPEC.md) |
 
 ### React → Phaser
 
@@ -84,8 +85,19 @@ All cross-boundary traffic uses **`window.dispatchEvent` / `addEventListener`**.
 |--------|------|----------|
 | `{characterName}-dialog-finished` | User finishes `DialogBox` | `{}` — `characterName` from React state (from last `new-dialog`) |
 | `menu-item-selected` | User picks a menu row | `{ selectedItem }` — string must match what scenes expect (`start`, `exit`, `game.game_over.retry`, etc.) |
+| `station-riddle-closed` | Contest riddle modal dismissed (submit success or cancel) | `{}` — `GameScene` clears `isShowingDialog` |
 
 **Dialog content** is currently a static object in `App.js` (`dialogs`), keyed by the same string as Tiled `dialog` / NPC texture keys (`npc_01`, `sword`, `push`, …). To add lines or characters, extend that object (or refactor to JSON/i18n).
+
+### Contest mini-game (overview)
+
+Full behavior, APIs, and persistence are described in **[CONTEST_GAME_PHASED_SPEC.md](./CONTEST_GAME_PHASED_SPEC.md)**. Short pointers:
+
+- **Bootstrap:** React calls the mock **`postContestBootstrap`** in [`src/game/api/mockContestBackend.js`](../src/game/api/mockContestBackend.js) after the user enters an access code; session config is stored on **`window.__CONTEST_SESSION__`** (`accessCode` + `config`) and **`MainMenuScene`** passes it into **`GameScene`** as **`contestSession`**.
+- **Map:** Riddle kiosks use Tiled **`stationId`** on the **`actions`** object layer (not `riddleId`). Only ids listed in **`config.activeStationIds`** are interactable.
+- **State:** [`src/game/contest/contestState.js`](../src/game/contest/contestState.js) persists **`contest_game_state_v1`** in **`localStorage`** (inventory slots, solved stations, etc.).
+- **Riddles:** [`RiddlePopup.js`](../src/game/RiddlePopup.js) submits answers via **`postValidateAnswer`**; responses never include the correct answer string—only **`valid`** and optional **16-character `componentHash`**.
+- **Placement zone:** Tile rectangles per `mapKey` in [`contestPlaceableBounds.js`](../src/game/contest/contestPlaceableBounds.js); **`GameScene#isWorldXYContestPlaceable`** (see [TILED_CONTEST.md](./TILED_CONTEST.md)). Extra tile layers for decoration were avoided so **grid-engine** does not walk broken layer data.
 
 ---
 
@@ -101,7 +113,7 @@ flowchart LR
 ```
 
 1. **BootScene** — Loading bar UI in Phaser; loads tilemaps, atlases, images; `create()` → `MainMenuScene`.
-2. **MainMenuScene** — Full-screen background + logo; fires `menu-items` with `['start','exit']`; listens once for `menu-item-selected`. **Start** passes `init` to `GameScene`: `heroStatus` (position, frame, facing, health 60/60, coin 0, flags) and `mapKey: 'home_page_city_house_01'`.
+2. **MainMenuScene** — Full-screen background + logo; fires `menu-items` with `['start','exit']`; listens once for `menu-item-selected`. **Start** passes `init` to `GameScene`: `heroStatus` (position, frame, facing, health 60/60, coin 0, flags), `mapKey: 'home_page_city_house_01'`, and optional **`contestSession`** from **`window.__CONTEST_SESSION__`** (set after contest bootstrap in `App.js`).
 3. **GameScene** — See next section.
 4. **GameOverScene** — Background + “game over” text; menu `game.game_over.retry` / `game.game_over.exit`; retry returns to main menu.
 
@@ -109,16 +121,17 @@ flowchart LR
 
 ## `GameScene` — responsibilities (the main file to edit)
 
-**Initialization:** `init(data)` stores `heroStatus` and `mapKey`. On `create()`:
+**Initialization:** `init(data)` stores `heroStatus`, `mapKey`, and optional **`contestSession`**. On `create()`:
 
-1. **Input:** Arrow keys + WASD, Enter (interact), Space (attack if sword).
-2. **Map:** `make.tilemap({ key: mapKey })`, `addTilesetImage('tileset','tileset')`, each layer `createLayer` + `collider` with hero. Layers whose **layer property** `type === 'elements'` are tracked for bush/box interactions.
+1. **Input:** Arrow keys + WASD, **Enter** and **E** (interact / contest stations), Space (attack if sword).
+2. **Map:** `make.tilemap({ key: mapKey })`, `addTilesetImage('tileset','tileset')`, each **tile** layer `createLayer` + `collider` with hero. Layers whose **layer property** `type === 'elements'` are tracked for bush/box interactions. Contest **placement** bounds are **not** an extra tile layer (see `contestPlaceableBounds.js`).
 3. **Hero:** Arcade sprite `hero`, stats on sprite (`health`, `maxHealth`, `coin`, `canPush`, `haveSword`), methods `restoreHealth`, `increaseMaxHealth`, `collectCoin`, `takeDamage`. Three helper bodies:
    - **`heroActionCollider`** — interact/attack hitbox (moves with facing in `update`).
    - **`heroPresenceCollider`** — large overlap (320×320) for “can enemy see / follow hero”.
    - **`heroObjectCollider`** — smaller overlap for enemy “touch” damage.
 4. **Object layer `actions`:** Iterates **every object’s properties** and switches on property **name**:
-   - **`dialog`** — Rectangle trigger; Enter + overlap with action collider → `new-dialog` with `characterName` = property value.
+   - **`dialog`** — Rectangle trigger; **Enter** or **E** + overlap with action collider → `new-dialog` with `characterName` = property value.
+   - **`stationId`** — Contest riddle kiosk; **Enter** or **E** when `contestSession.config.activeStationIds` includes this id → `open-station-riddle` with prompt metadata from bootstrap (not from Tiled).
    - **`npcData`** — String parsed by `extractNpcDataFromTiled`: `npcKey:movementType;delay;area;direction`. Adds NPC to grid-engine; `random` → `moveRandomly`.
    - **`itemData`** — `type:...` prefix (`coin`, `heart`, `heart_container`, `sword`, `push`) spawns pickup sprites (some gated by `heroHaveSword` / `heroCanPush`).
    - **`enemyData`** — `enemyType:enemyAI:speed:health` (see Enemies).
@@ -136,7 +149,8 @@ flowchart LR
 - **Tile size:** 16×16 (positions divide by 16 when placing grid characters).
 - **Tileset in maps:** First gid set uses embedded tileset pointing at shared `tileset.png` (loaded as key `tileset`).
 - **Layer property `type: elements`:** Required for layers that hold bushes/boxes the hero can strike (overlap uses tile **index** 428/427).
-- **Object layer name:** `actions` (hardcoded in `GameScene`: `map.getObjectLayer('actions')`).
+- **Object layer name:** `actions` (hardcoded in `GameScene`: `map.getObjectLayer('actions')`). Contest kiosks use property **`stationId`** (string); see [TILED_CONTEST.md](./TILED_CONTEST.md).
+- **Contest placement mask:** Code in **`contestPlaceableBounds.js`** + **`isWorldXYContestPlaceable`** on `GameScene` (not a separate Tiled tile layer; avoids grid-engine / Phaser layer issues).
 - **Grid-engine collision:** Comes from tile properties (e.g. `ge_collide`) as expected by grid-engine on the map JSON.
 - **Teleport value format:** `teleportTo` = `"<mapKey>:<tileX>,<tileY>"` (see `extractTeleportDataFromTiled`).
 - **NPC value format:** `npcData` = `"<atlasKey>:<movement>;<delay>;<area>;<facingDirection>"` (see `extractNpcDataFromTiled`).
@@ -193,5 +207,6 @@ Enemy sprites use **atlas key = full `enemyType` string** from Tiled (e.g. type 
 ## Changelog (this doc)
 
 - **2026-04-06:** Initial architecture pass: scenes, events, `GameScene` systems, Tiled conventions, assets, customization table, known issues.
+- **2026-04-06:** Contest flow: `stationId`, `open-station-riddle`, `station-riddle-closed`, `contestPlaceableBounds` + `isWorldXYContestPlaceable`, mock backend + `contestState` pointers; link to `CONTEST_GAME_PHASED_SPEC.md`.
 
 When you change behavior, append a dated line here and adjust the relevant section above.
