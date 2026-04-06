@@ -1,6 +1,9 @@
 /**
  * Mock contest API — swap fetch base URL for production later.
  * Logical paths: POST /contest/bootstrap, POST /validate-answer, POST /validate-circuit-final
+ *
+ * Demo access codes (uppercase): DEMO — both stations active; DEMO2 — only station_r1 active
+ * (change KNOWN_CODES to test Phase 2 without editing Tiled).
  */
 
 const KNOWN_CODES = {
@@ -16,6 +19,22 @@ const KNOWN_CODES = {
             station_c1: {
                 title: 'Second bench',
                 prompt: 'I store energy in an electric field between two plates. What am I? (one word)',
+                rewardComponentType: 'capacitor',
+            },
+        },
+    },
+    DEMO2: {
+        circuitVariantId: 'variant_a_parallel_led',
+        activeStationIds: ['station_r1'],
+        stations: {
+            station_r1: {
+                title: 'Bench A (profile DEMO2)',
+                prompt: 'Profile DEMO2: what two-terminal device is measured in ohms? (one word)',
+                rewardComponentType: 'resistor',
+            },
+            station_c1: {
+                title: 'Bench B (inactive in DEMO2)',
+                prompt: 'This copy exists in bootstrap but the station is inactive for DEMO2.',
                 rewardComponentType: 'capacitor',
             },
         },

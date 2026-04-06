@@ -78,6 +78,8 @@ All cross-boundary traffic uses **`window.dispatchEvent` / `addEventListener`**.
 | `hero-health` | Health changes / death | `{ healthStates: ('full'\|'half'\|'empty')[] }` — empty array hides HUD |
 | `hero-coin` | Coin changes / death | `{ heroCoins: number \| null }` — `null` hides HUD |
 | `open-station-riddle` | Contest: hero overlaps an **active** `stationId` and presses **E** or **Enter** | `{ stationId, title, prompt, accessCode, rewardComponentType }` — see [CONTEST_GAME_PHASED_SPEC.md](./CONTEST_GAME_PHASED_SPEC.md) |
+| `contest-station-inactive` | Contest: hero overlaps a `stationId` and presses **E** or **Enter**, but there is **no session**, the station is **not** in `activeStationIds`, or bootstrap has **no** metadata for that id | `{ stationId, reason: 'no_session' \| 'inactive' \| 'no_metadata' }` — React shows a short non-blocking note |
+| `contest-state-changed` | Contest: `localStorage` contest state was updated (bootstrap merge, new session, or successful riddle solve) | `{}` — inventory UI listens to refresh the read-only strip |
 
 ### React → Phaser
 

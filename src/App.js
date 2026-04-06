@@ -13,6 +13,7 @@ import DialogBox from "./game/DialogBox";
 import HeroCoin from "./game/HeroCoin";
 import HeroHealth from "./game/HeroHealth";
 import RiddlePopup from './game/RiddlePopup';
+import ContestInventoryBar from './game/ContestInventoryBar';
 import './App.css';
 import { calculateGameSize } from "./game/utils";
 import { bootstrapContestSession, loadContestState } from './game/contest/contestState';
@@ -75,6 +76,13 @@ const useStyles = makeStyles((theme) => ({
       fontSize: '10px',
     },
   },
+  contestInactiveNote: {
+    fontFamily: '"Press Start 2P"',
+    fontSize: '9px',
+    color: '#ffcc80',
+    marginLeft: '8px',
+    flex: '1 1 auto',
+  },
   preLoadDialogImage: {
     backgroundImage: `url("${dialogBorderBox}")`,
     backgroundSize: '1px',
@@ -134,6 +142,7 @@ function App() {
   const [accessMsg, setAccessMsg] = useState('');
   const [contestReady, setContestReady] = useState(false);
   const [riddlePayload, setRiddlePayload] = useState(null);
+  const [inactiveStationNote, setInactiveStationNote] = useState('');
 
   const handleContestBootstrap = useCallback(async () => {
     setAccessMsg('');
@@ -142,6 +151,7 @@ function App() {
       window.__CONTEST_SESSION__ = { accessCode: state.accessCode, config };
       setContestReady(true);
       setAccessMsg('Session ready — start the game from the menu.');
+      window.dispatchEvent(new CustomEvent('contest-state-changed'));
     } catch (e) {
       setContestReady(false);
       window.__CONTEST_SESSION__ = undefined;
@@ -182,6 +192,7 @@ function App() {
         window.__CONTEST_SESSION__ = { accessCode: state.accessCode, config };
         setContestReady(true);
         setAccessMsg('Restored session from browser storage.');
+        window.dispatchEvent(new CustomEvent('contest-state-changed'));
       } catch {
         window.__CONTEST_SESSION__ = undefined;
       }
@@ -271,6 +282,27 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let hideTimer;
+    const onInactive = ({ detail }) => {
+      const reason = detail?.reason;
+      if (reason === 'no_session') {
+        setInactiveStationNote('Enter a contest access code first.');
+      } else if (reason === 'no_metadata') {
+        setInactiveStationNote('Station config missing.');
+      } else {
+        setInactiveStationNote('This station is inactive.');
+      }
+      window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => setInactiveStationNote(''), 3500);
+    };
+    window.addEventListener('contest-station-inactive', onInactive);
+    return () => {
+      window.removeEventListener('contest-station-inactive', onInactive);
+      window.clearTimeout(hideTimer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!riddlePayload) {
       return;
     }
@@ -310,6 +342,11 @@ function App() {
                 (E or Enter at a station)
               </Typography>
           ) : null}
+          {inactiveStationNote ? (
+              <Typography className={classes.contestInactiveNote} component="span">
+                {inactiveStationNote}
+              </Typography>
+          ) : null}
         </div>
         <div className={classes.gameWrapper}>
           <div
@@ -319,6 +356,7 @@ function App() {
           >
             {/* this is where the game canvas will be rendered */}
           </div>
+          <ContestInventoryBar visible={contestReady} />
           {heroHealthStates.length > 0 && (
               <HeroHealth
                   gameSize={{

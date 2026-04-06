@@ -21,3 +21,14 @@ Later you can switch to **Tiled object** rectangles or **tile properties** on an
 ## File locations
 
 Contest-capable house maps live under `src/game/assets/sprites/maps/houses/`. Each map used as the contest entry must be imported and `load.tilemapTiledJSON` in `BootScene.js`, and the same key passed from `MainMenuScene` as `mapKey`.
+
+## Mock access codes (no Tiled edits)
+
+The mock backend [`src/game/api/mockContestBackend.js`](../src/game/api/mockContestBackend.js) defines **`DEMO`** and **`DEMO2`**:
+
+| Code | `activeStationIds` (illustrative) |
+|------|-----------------------------------|
+| **DEMO** | `station_r1`, `station_c1` — both benches active |
+| **DEMO2** | `station_r1` only — second bench exists on the map but is inactive |
+
+Change prompts and active sets in `KNOWN_CODES` to verify Phase 2 without editing the map.

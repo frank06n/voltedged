@@ -631,18 +631,38 @@ export default class GameScene extends Scene {
                                 return;
                             }
 
-                            const cfg = this.contestSession?.config;
-                            const active = cfg?.activeStationIds?.includes(stationId);
-                            if (!active || !this.contestSession?.accessCode) {
+                            if (!this.wasInteractPressed()) {
                                 return;
                             }
 
-                            if (!this.wasInteractPressed()) {
+                            const accessCode = this.contestSession?.accessCode;
+                            const cfg = this.contestSession?.config;
+
+                            if (!accessCode) {
+                                window.dispatchEvent(
+                                    new CustomEvent('contest-station-inactive', {
+                                        detail: { stationId, reason: 'no_session' },
+                                    })
+                                );
+                                return;
+                            }
+
+                            if (!cfg?.activeStationIds?.includes(stationId)) {
+                                window.dispatchEvent(
+                                    new CustomEvent('contest-station-inactive', {
+                                        detail: { stationId, reason: 'inactive' },
+                                    })
+                                );
                                 return;
                             }
 
                             const stationMeta = cfg?.stations?.[stationId];
                             if (!stationMeta) {
+                                window.dispatchEvent(
+                                    new CustomEvent('contest-station-inactive', {
+                                        detail: { stationId, reason: 'no_metadata' },
+                                    })
+                                );
                                 return;
                             }
 
@@ -651,7 +671,7 @@ export default class GameScene extends Scene {
                                     stationId,
                                     title: stationMeta.title || stationId,
                                     prompt: stationMeta.prompt || '',
-                                    accessCode: this.contestSession.accessCode,
+                                    accessCode,
                                     rewardComponentType: stationMeta.rewardComponentType || 'unknown',
                                 },
                             });

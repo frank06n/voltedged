@@ -424,5 +424,6 @@ These are **small**; resolve while coding:
 |------|--------|
 | 2026-04-06 | Initial phased spec from full problem statement; Phase 1 cross-linked to on-hold implementation plan. |
 | 2026-04-06 | Major revision: `stationId`; `/contest/bootstrap`, `/validate-answer`, `/validate-circuit-final`; 16-char hashes; six component types; 8 stackable slots + 1–8 keys; click place/unplace; E station vs E cycle; Q frontend check; localStorage state; multi-room single level; circuit as `PlacedPart[]`; mock file location; out-of-scope leaderboard. |
+| 2026-04-06 | Phase 1–2 polish: read-only 8-slot inventory strip in React; `contest-station-inactive` + `contest-state-changed` window events; second mock code **DEMO2** in `mockContestBackend.js` (documented in TILED_CONTEST). |
 
 Add a row whenever you change phase scope or API contracts.

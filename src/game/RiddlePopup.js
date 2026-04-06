@@ -104,6 +104,7 @@ export default function RiddlePopup({
                     componentHash: res.componentHash,
                     rewardComponentType: rewardComponentType || 'unknown',
                 });
+                window.dispatchEvent(new CustomEvent('contest-state-changed'));
             }
             handleClose();
         } catch {
