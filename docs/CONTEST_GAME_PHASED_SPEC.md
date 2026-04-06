@@ -1,6 +1,6 @@
 # Contest electronics mini-game — problem statement and phased roadmap
 
-**Purpose:** Single reference for *what* you are building (beyond the current template), *how* it maps to this repo, and *in what order* to implement it. Phase 1 matches the prototyping track described in [`.cursor/plans/contest_riddle_mini-game_f1d62d16.plan.md`](../.cursor/plans/contest_riddle_mini-game_f1d62d16.plan.md) (currently **on hold**).
+**Purpose:** Single reference for *what* you are building (beyond the current template), *how* it maps to this repo, and *in what order* to implement it. Phase 1 prototyping overlaps [`.cursor/plans/contest_riddle_mini-game_f1d62d16.plan.md`](../.cursor/plans/contest_riddle_mini-game_f1d62d16.plan.md) — **update that plan** when implementing so event names and endpoints match this doc.
 
 **Companion docs:** [GAME_ARCHITECTURE.md](./GAME_ARCHITECTURE.md) (current engine layout).
 
@@ -10,7 +10,7 @@
 
 ## 1. Vision in one paragraph
 
-The player explores a **top-down map** with **no NPCs and no combat**. Many **stations** can be interacted with (**E**), but only a **subset is active** at any time—eventually chosen by a **backend**; for now **mock data** mimics that contract. Active stations show a **riddle**; the player types an answer (typically an **electronics component name**). Answers are **validated only via a POST**-shaped call: the server (or mock) returns **correct/incorrect only**, **never the answer text**. On success, the player **earns a component** represented as a **tile or sprite** in the game. Components live in an **inventory**; the player can **place** them on the map and **interact** with placed parts (e.g. **cycle resistance**, **toggle a switch**) to build a **target circuit**. **Winning** occurs when the **combination and parameterization** of placed components matches the **goal circuit** (validated similarly via backend/mock, not by trusting the client alone in production).
+The player explores a **single-level, multi-room** top-down map with **no NPCs and no combat**. At game start they enter an **access code**; a **backend (mocked for now)** returns a **contest configuration**: which **stations** are active, riddle copy, and which **circuit variant** (one of several predefined targets) they must realize. Only **certain map regions** accept **placed components**. Stations are interacted with via **E** and show a riddle; answers are validated with **`POST /validate-answer`** — responses **never include the correct answer**; on success the server returns a **16-character component hash** (authoritative identity for that earned part). The player has an **8-slot stackable inventory**; they **place** parts with **left-click** on valid empty cells and **unplace** with **right-click** (returning to a free slot, stacking duplicates), except for **pre-seeded** parts marked **non-removable**. **E** on a placed part **cycles** its discrete state (e.g. resistance step, switch on/off). A **frontend** check (minimal `if`/`else`, optional RC-style math **left commented** for later) gives immediate feedback; **Q** runs that check manually. When the assembly is complete, the client sends **placed layout + hashes** to the backend **`POST /validate-circuit-final`** (mocked); **only that response** grants **victory**. **localStorage** persists progress across reloads. **Session leaderboards** are **out of scope** for now.
 
 ---
 
@@ -18,47 +18,167 @@ The player explores a **top-down map** with **no NPCs and no combat**. Many **st
 
 ### 2.1 Core loop
 
-1. **Explore** — Walk the map (grid movement, existing [`GameScene`](src/game/scenes/GameScene.js) + grid-engine).
-2. **Discover** — See many interactable markers; only **active** ones respond (visual distinction: dimmed vs glowing, or hidden prompt until active).
-3. **Solve** — **E** opens UI: riddle text + text field → **submit** triggers **POST /validate-answer** (mocked) → feedback only (`ok` / `wrong`), no answer leak.
-4. **Collect** — Correct solve grants a **component instance** (type: resistor, capacitor, …) into **inventory**.
-5. **Build** — From inventory, enter **place mode** (or drag/select slot) and put components on **valid cells** (breadboard / snap grid / dedicated layer—TBD per design).
-6. **Tune** — **E** on a **placed** component opens **component-specific** interaction: e.g. resistor cycles Ω values; switch toggles open/closed; LED brightness tied to solved sub-state—**design-dependent**.
-7. **Win** — When the **circuit state** (topology + parameters) satisfies the **goal**, trigger victory (POST /validate-circuit or mock).
+1. **Start** — User enters **access code** → **`POST /contest/bootstrap`** (mock) returns full **contest config** (active stations, prompts, `circuitVariantId`, etc.).
+2. **Explore** — Walk between **rooms** on one level ([`GameScene`](src/game/scenes/GameScene.js) + grid-engine); **inventory is global** to the level.
+3. **Discover** — Many **`stationId`** markers exist in Tiled; only ids listed in config as **active** open riddles (visual: dim vs active).
+4. **Solve** — **E** at station → React riddle UI → **`POST /validate-answer`** → `{ valid, componentHash? }` (16-char hash only if valid; **never** the answer string).
+5. **Collect** — Valid answer pushes a stack for that component type into a **random free inventory slot** (1–8); **same-type stacks** in one slot.
+6. **Build** — Select slot with **1–8**. **Left-click** a **legal, empty** grid cell in the **placement zone** → place one unit from that slot. **Right-click** a **player-placed** cell → return one unit to inventory (stack). **Locked** pre-placed parts cannot be unplaced.
+7. **Tune** — **E** while facing/overlapping a **placed** part (priority below) **cycles** its variant state (resistor value, switch, etc.).
+8. **Check** — **Q** runs the **frontend** circuit check for the configured `circuitVariantId` (scaffold with **detailed physics commented out**).
+9. **Win** — User triggers final submit (or flow after successful check) → **`POST /validate-circuit-final`** with **assembly + hashes** → server returns victory or not.
 
-### 2.2 Non-goals (for this product)
+### 2.2 Component catalog (v1)
+
+Fixed set of part **types** (art + logic hooks):
+
+| Type id | Role |
+|---------|------|
+| `resistor` | Cycle discrete R (values TBD in implementation). |
+| `capacitor` | Cycle discrete C / state (TBD). |
+| `switch` | Toggle on/off (or cycle). |
+| `power_source` | Fixed or cycled voltage state (TBD). |
+| `wire` | Connection / bridge representation on grid (TBD). |
+| `bulb_load` | Load / brightness state driven by simple rules (TBD). |
+
+### 2.3 Non-goals (for this product)
 
 - NPC dialogue trees, shop economy, combat, enemy AI, health/coins as primary mechanics (existing systems may remain in code but should be **disabled or removed** from the contest build).
-- Teaching a full SPICE engine inside the browser (unless you explicitly choose that later); early phases can use **discrete state** and **rule checks** instead of analog simulation.
+- Full SPICE / accurate analog simulation in v1 — **minimal boolean/numeric checks** only; elaborate **RC/network math stays commented** until you need it.
+- **Leaderboards** and **session analytics** — **ignored for now**.
 
-### 2.3 Backend principles (even while mocked)
+### 2.4 Backend principles (even while mocked)
 
 | Principle | Meaning |
 |-----------|---------|
-| **Authoritative activation** | Which station ids are active, and their riddle payload, come from API/mock—not hardcoded per build for production. |
-| **No answer in responses** | Validation endpoints return e.g. `{ "valid": true }` or `{ "valid": false, "hintLevel": 0 }`—never `expectedAnswer`. |
-| **Authoritative win** | Final circuit validation should be server-side in production; client can preview “looks connected” UX only. |
-| **Mock parity** | Mock layer implements the **same request/response shapes** as the real API so swapping URLs is trivial. |
+| **Authoritative config** | Active stations, riddle text, answer grading, component hashes, and circuit variant id come from **bootstrap** + **validate-answer** + **validate-circuit-final** — not from client-trusted static files in production. |
+| **No answer leak** | **`POST /validate-answer`** returns at most `valid` + `componentHash` (16 chars). Never `expectedAnswer` or plaintext solution. |
+| **Hash as component identity** | The **16-character hash** ties an earned part instance to the server-side definition; final validation receives **hashes + layout** so the server can confirm the assembly. |
+| **Authoritative win** | Only **`POST /validate-circuit-final`** confirms victory (mock returns the same shape as future API). |
+| **Mock parity** | All endpoints implemented in **`src/game/api/mockContestBackend.js`** (or similar **single module**); production swaps base URL only. |
 
 ---
 
-## 3. How this maps to the current codebase
+## 3. Resolved design decisions (reference)
+
+These replace the older “open questions” list.
+
+### 3.1 Identifiers: `stationId` (not `riddleId`)
+
+- **Tiled** `actions` objects use custom property **`stationId`** (string, unique per kiosk in the level).
+- Riddle **text** and **active flag** come from **bootstrap config** keyed by `stationId`. No separate `riddleId` property.
+
+### 3.2 Temporary API surface (mock; rename later if backend differs)
+
+All paths are **logical** — prefix with `/api` in `fetch` if you prefer (`/api/contest/bootstrap`, etc.).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | **`/contest/bootstrap`** | Body: `{ "accessCode": string }`. Returns **contest config** (see §3.5). |
+| `POST` | **`/validate-answer`** | Body: `{ "stationId": string, "answer": string, "accessCode": string }`. Returns `{ "valid": boolean, "componentHash"?: string }` — when `valid === true`, `componentHash` is exactly **16 characters** (e.g. hex `[0-9a-f]{16}`); adjust if your backend uses another alphabet. |
+| `POST` | **`/validate-circuit-final`** | Body: `{ "accessCode": string, "circuitVariantId": string, "assembly": ... }` (see §3.7). Returns `{ "victory": boolean }` (optional non-spoiler `reasonCode` later). |
+
+### 3.3 Contest state bag + persistence
+
+- **Canonical persisted state** lives in **`localStorage`** (one JSON blob, e.g. key `contest_game_state_v1`), updated after: bootstrap success, each answer result, inventory change, place/unplace, variant cycle, room change (if needed).
+- **Suggested shape** (implementations may extend):
+
+```json
+{
+  "accessCode": "",
+  "circuitVariantId": "",
+  "inventorySlots": [
+    { "slotIndex": 0, "stacks": [{ "type": "resistor", "count": 2, "componentHashes": ["..."] }] }
+  ],
+  "selectedSlotIndex": 0,
+  "placed": [
+    {
+      "gridX": 0,
+      "gridY": 0,
+      "type": "resistor",
+      "variant": { "rOhms": 1000 },
+      "componentHash": "16CHARHASHHERE01",
+      "locked": false
+    }
+  ],
+  "solvedStationIds": ["station_a"]
+}
+```
+
+- **`heroStatus`** from Phaser can still carry **position / mapKey** across teleports; **inventory + placed + hashes** should **rehydrate from localStorage** on scene load so **multi-room** does not desync.
+
+### 3.4 Who drives placement vs conflicts
+
+- **React** (or a small **game state module** imported by both) owns **inventory slots, selected index (1–8), and persisted blob**. Phaser reports **pointer → grid cell**, **placement zone hit-test**, and **which face/overlap target** for **E**.
+- **Placement:** **No separate modal “placement mode.”** If **selected slot** has quantity **> 0** and **left-click** hits an **empty** legal cell → decrement stack, add `placed` entry. Otherwise ignore.
+- **Unplace:** **Right-click** on **unlocked** placed cell → remove one visual instance, **push one unit** to inventory (merge stack / random free slot per rules below).
+- **Overlap priority when pressing E:** If the hero overlaps **both** a **station trigger** and a **placed part** hitbox, **prefer the riddle station** first (document in code). If that is wrong in playtests, switch to **nearest-to-focal-point** rule — **ask** if ambiguous.
+
+### 3.5 Bootstrap response shape (illustrative)
+
+```json
+{
+  "circuitVariantId": "variant_b_series_led",
+  "activeStationIds": ["station_r1", "station_c1"],
+  "stations": {
+    "station_r1": { "title": "…", "prompt": "…" }
+  }
+}
+```
+
+- Client **must not** infer answers from this payload.
+
+### 3.6 Inventory rules
+
+- **8 slots**, indices **0–7**; keys **`1`–`8`** map to slots **0–7**.
+- **New reward:** add to a **random free slot** (slot with no items or empty stack — define: prefer empty slot first, else random among slots that already hold same `type` for stacking, per product preference: **user asked stackable** → prefer **stacking on existing type**, else random empty slot).
+- **Stacking:** Multiple of the **same type** in one slot share one row UI with **count**; each pickup may still carry its own **`componentHash`** in an array for final validation.
+
+### 3.7 Grid and circuit representation (frontend check)
+
+- **One grid cell** holds **at most one** placed component.
+- **Circuit snapshot for checks** = **array of placed parts**:
+
+```ts
+// Conceptual
+PlacedPart[] = {
+  gridX, gridY,
+  type: ComponentType,
+  variant: Record<string, unknown>, // e.g. { rOhms: 1000 }, { closed: true }
+  componentHash: string | null,    // null for pre-placed props if no hash
+  locked: boolean
+}[]
+```
+
+- **Verification** for a given `circuitVariantId`: **simple `if`/`else`** over that array (and optionally adjacency). **Comment blocks** reserve space for richer **resistor/capacitor network** math — **not required** for first playable.
+
+### 3.8 Manual circuit check
+
+- **`Q`** — runs **frontend** validator only (UX feedback). Does **not** replace **`/validate-circuit-final`**.
+
+### 3.9 Level structure
+
+- **Multiple rooms**, **one level**, **shared inventory and placement state** across room transitions (teleports or map swaps).
+
+---
+
+## 4. How this maps to the current codebase
 
 | Today | Your target |
 |-------|-------------|
-| [`GameScene.js`](src/game/scenes/GameScene.js) — hero, NPCs, enemies, items, teleports, bush/box combat | Slim **contest scene** (or feature flags): movement + interactables + placed components only |
-| [`App.js`](src/App.js) — `CustomEvent` bridge, `DialogBox`, menus, health/coins | Add **riddle modal**, **inventory UI**, optional **placement HUD**; hide or remove health/coin for contest |
-| Tiled `actions` layer — `dialog`, `npcData`, `enemyData`, `itemData`, `teleportTo` | New/standardized properties: e.g. `stationId` (string), optional `placeSlot` layer for build grid |
-| Static `dialogs` object in `App.js` | Replaced or supplemented by **payload from mock/API** per active station |
-| grid-engine | Keep for **player**; **NPC/enemy** registration can be dropped. **Placed components** might be **sprites snapped to grid** without grid-engine characters, or static bodies—phase decision |
+| [`GameScene.js`](src/game/scenes/GameScene.js) — NPCs, enemies, combat | **Contest mode:** stations + placement grid + pointer handling + **E** / **Q**; strip or guard old systems |
+| [`App.js`](src/App.js) | **Code entry** → bootstrap; **riddle modal**; **inventory bar (8 slots)**; hide health/coin in contest |
+| Tiled `actions` | Objects with **`stationId`**; optional **placement zone** (tile layer property `contest_placeable` or dedicated layer) |
+| `dialogs` in `App.js` | **Superseded** by config from **`/contest/bootstrap`** for contest mode |
+| grid-engine | **Player only**; placed parts are **sprites** on grid, not grid-engine characters |
 
-**Persistence today:** `heroStatus` passed through `scene.restart` for teleports. You will need a **contest state bag** (inventory, placed entities, solved station ids, component parameters) carried the same way **or** centralized in React and synced via events—pick one pattern in Phase 3 and stay consistent.
+**Mock implementation file:** e.g. [`src/game/api/mockContestBackend.js`](src/game/api/mockContestBackend.js) (all three endpoints, sample codes, sample hashes). **No** answers in GET/bootstrap payloads.
 
 ---
 
-## 4. Phased roadmap (super detailed)
+## 5. Phased roadmap (super detailed)
 
-Each phase lists **goals**, **deliverables**, **code touchpoints**, **data/API contracts**, **acceptance criteria**, and **dependencies**. Later phases assume earlier ones are done (or stubbed).
+Each phase lists **goals**, **deliverables**, **code touchpoints**, **data/API contracts**, **acceptance criteria**, and **dependencies**.
 
 ---
 
@@ -66,360 +186,243 @@ Each phase lists **goals**, **deliverables**, **code touchpoints**, **data/API c
 
 **Goals**
 
-- Establish **your** map geometry, collision, and visual identity in Tiled without yet wiring full game logic.
-- Define naming conventions for layers and object properties so Phaser code stays stable as art changes.
+- **Multi-room** single level: Tiled maps + teleports as today, or one map with disjoint walkable regions.
+- **Placement zone** clearly authored: e.g. tile property **`contest_placeable: true`** on a dedicated layer, or object-layer rectangles merged at runtime.
+- **Station** objects on **`actions`** with **`stationId`**.
 
 **Deliverables**
 
-- One or more Tiled maps (JSON) under [`src/game/assets/sprites/maps/`](src/game/assets/sprites/maps/) imported in [`BootScene.js`](src/game/scenes/BootScene.js).
-- Documented conventions (in this file or a short `docs/TILED_CONTEST.md` later):
-  - **Collision / walkable:** align with grid-engine expectations (tile properties such as `ge_collide` as today).
-  - **Station markers:** objects on `actions` with stable **`stationId`** (string, unique per physical kiosk).
-  - Optional: a **placement layer** or object grid for “where components may be dropped” (even if unused until Phase 4).
+- Map JSON under [`src/game/assets/sprites/maps/`](src/game/assets/sprites/maps/), preloaded in [`BootScene.js`](src/game/scenes/BootScene.js).
+- Short inline legend in this doc or `docs/TILED_CONTEST.md` for `stationId` + `contest_placeable`.
 
 **Code touchpoints**
 
-- [`BootScene.js`](src/game/scenes/BootScene.js) — preload new map keys.
-- [`MainMenuScene.js`](src/game/scenes/MainMenuScene.js) — `mapKey` for contest entry.
+- [`BootScene.js`](src/game/scenes/BootScene.js), [`MainMenuScene.js`](src/game/scenes/MainMenuScene.js) (`mapKey`).
 
-**API / mock**
+**Acceptance criteria**
+
+- Player can walk all contest rooms; placement layer is queryable in Phaser (even if placement logic comes later).
+
+**Dependencies**
 
 - None.
 
-**Acceptance criteria**
-
-- Game loads your map; player can walk bounds you expect; no dependency on riddles yet.
-
-**Dependencies**
-
-- None (can parallelize with Phase 1).
-
 ---
 
-### Phase 1 — Prototyping: move, E to interact, riddle UI, local/mock validation shape
-
-**Status:** Described in detail in the **on-hold** plan [contest_riddle_mini-game_f1d62d16.plan.md](../.cursor/plans/contest_riddle_mini-game_f1d62d16.plan.md). Treat that document as the **implementation checklist** for this phase; this spec only **reframes** it in the larger product.
+### Phase 1 — Bootstrap, move, E on station, riddle UI, `POST /validate-answer`
 
 **Goals**
 
-- Prove the **React overlay + Phaser freeze** loop for **one** riddle station.
-- **E** (and optionally Enter) triggers interaction when overlapping a hotspot.
-- Popup: **prompt + optional text input**; grading calls a function shaped like **`POST /stations/:id/answer`** but implemented as **mock** returning `{ valid: boolean }` only.
+- **Access code** screen → **`POST /contest/bootstrap`** (mock) → store config + **localStorage** seed.
+- **E** on **active** `stationId` opens React riddle UI; submit → **`POST /validate-answer`**; on success receive **16-char `componentHash`**, add to inventory (random slot / stacking).
+- Block movement while modal open (existing `isShowingDialog` pattern).
 
 **Deliverables**
 
-- `open-riddle` / `riddle-ui-closed` (or equivalent) events documented in [GAME_ARCHITECTURE.md](./GAME_ARCHITECTURE.md).
-- `RiddlePopup` (or extended `DialogBox`) in React.
-- `GameScene` branch for Tiled property (e.g. `riddleId` or prefer **`stationId`** early to match Phase 2 naming).
+- `RiddlePopup` + events (`open-riddle`, close callbacks).
+- Wire mock **`mockContestBackend.js`**.
+
+**API**
+
+- See §3.2 — **`/contest/bootstrap`**, **`/validate-answer`**.
+
+**Acceptance criteria**
+
+- Wrong answer: no hash, no inventory change. Right answer: hash stored per stack item, visible in slot.
+
+**Dependencies**
+
+- Phase 0.
+
+**Note:** The older Cursor plan may still list `riddleId` / other paths — **align it** with §3.2 when un-holding the plan.
+
+---
+
+### Phase 2 — Full config-driven active stations + polish
+
+**Goals**
+
+- All riddle copy and **activeStationIds** **only** from bootstrap (no hardcoded prompts in React for production path).
+- Inactive stations: no open on **E** (optional “inactive” feedback).
+
+**Acceptance criteria**
+
+- Change mock JSON → different active set and text without editing Tiled.
+
+**Dependencies**
+
+- Phase 1.
+
+---
+
+### Phase 3 — Component art + 8-slot HUD + keyboard `1`–`8`
+
+**Goals**
+
+- Preload sprites/tiles for all six types.
+- React **inventory bar**: 8 slots, show **count**, highlight **selected** (keys **1–8**).
+
+**Acceptance criteria**
+
+- Selecting empty vs non-empty slot updates UI; state persists in **localStorage** with the blob.
+
+**Dependencies**
+
+- Phase 1 rewards.
+
+---
+
+### Phase 4 — Placement zone + pointer place/unplace
+
+**Goals**
+
+- **Left-click** (canvas): if selected slot has items and cell in **placement zone** and **empty** → place.
+- **Right-click**: remove **one** **unlocked** placed part, return to inventory (**stack** / free slot rules §3.6).
+- **Pre-placed** parts: `locked: true` in persisted state + Tiled or bootstrap seed.
 
 **Code touchpoints**
 
-- [`GameScene.js`](src/game/scenes/GameScene.js), [`App.js`](src/App.js), new `src/game/RiddlePopup.js`, optional `src/game/api/mockContestApi.js`.
-
-**API contract (mock = same shape as future backend)**
-
-```http
-POST /api/stations/:stationId/answer
-Content-Type: application/json
-
-{ "answer": "string from user input" }
-```
-
-```json
-200 OK
-{ "valid": true }
-```
-
-or
-
-```json
-200 OK
-{ "valid": false }
-```
-
-(No `correctAnswer`, `expected`, or full solution.)
+- [`GameScene.js`](src/game/scenes/GameScene.js) — pointer → grid; `contest_placeable` query; sync to state module / React.
 
 **Acceptance criteria**
 
-- At least one station: wrong answer shows failure; correct shows success and closes modal; movement blocked while open.
+- Cannot place outside zone; cannot place on occupied cell; cannot unplace locked parts.
 
 **Dependencies**
 
-- Phase 0 map with at least one `stationId` object (or temporary `riddleId` alias you rename in Phase 2).
-
-**Note:** Phase 1 **prototype** may still use a **local manifest** for prompt text for speed; Phase 2 moves prompts to **mock “session config”** from API.
+- Phase 3.
 
 ---
 
-### Phase 2 — Mock backend: active stations + question payload + POST-only validation
+### Phase 5 — **E** cycles placed-component state
 
 **Goals**
 
-- **Central mock** (replace scattered JSON) that answers:
-  - Which **`stationId`s are active** for this “session”?
-  - For each active station: **riddle text** (and metadata: title, optional difficulty)—**not** the answer.
-- Client **never** embeds correct answers for production path; mock module may hold them **only** to simulate server validation (clearly separated file, e.g. `mockServerState.js` not shipped in a secure build—or behind env flag).
-
-**Deliverables**
-
-- **`GET /api/session` or `GET /api/stations/active`** mock returning:
-
-```json
-{
-  "activeStationIds": ["station_a", "station_c"],
-  "stations": {
-    "station_a": { "prompt": "...", "title": "Riddle A" }
-  }
-}
-```
-
-- Phaser: on scene load (or interval), **fetch mock**; build a **`Set` of active ids**; **disable** interaction UI for inactive (optional: show inactive art).
-- Answer flow: **only** `POST .../answer` as in Phase 1.
-
-**Code touchpoints**
-
-- New `src/game/api/contestApi.js` — `fetchActiveStations()`, `submitAnswer(stationId, answer)` wrapping `fetch` or `axios`.
-- `GameScene` — filter overlaps: if `!activeSet.has(stationId)`, no open modal (or show “offline” toast).
-- `App.js` — optionally show global “session loaded” debug in dev.
+- Overlap / facing rules for “current interactable placed part.”
+- Per-type **cycle** tables (resistor steps, switch, etc.).
+- Update **localStorage** on each change.
 
 **Acceptance criteria**
 
-- Changing mock data **without** editing Tiled changes which kiosks work and what text appears.
-- Network tab (or mock interceptor) shows **no answer** in GET responses.
+- **E** never opens a modal for parts (only stations use modal); cycling is in-world or minimal HUD.
 
 **Dependencies**
 
-- Phase 1 event + UI shell.
+- Phase 4.
 
 ---
 
-### Phase 3 — Rewards: component tiles + inventory (data + UI)
+### Phase 6 — Frontend circuit check (**Q**) + commented deep logic
 
 **Goals**
 
-- On **`valid: true`** from answer POST, grant a **component reward** (e.g. `type: "resistor"`, `instanceId: uuid`, default `state` for params).
-- Represent the reward **in-game** as a **tile/sprite** (reuse tileset or small atlas per component family).
-- **Inventory** model: ordered list of instances; **React HUD** (icons + count or list); sync with Phaser via events.
-
-**Deliverables**
-
-- **Component taxonomy** (versioned enum): `resistor | capacitor | switch | led | wire | ...` aligned with your art.
-- **Instance record:** `{ instanceId, type, variant?, params? }` (params filled in Phase 5).
-- Events e.g. `inventory-updated` with `{ items: [...] }` from Phaser → React, or inventory owned in React and Phaser requests “consume for place”—choose **single source of truth** (recommended: **React** for inventory list, Phaser for world entities, sync on place/pickup).
-
-**Code touchpoints**
-
-- [`BootScene.js`](src/game/scenes/BootScene.js) — preload component sprites/tiles.
-- New `src/game/inventory/` or `src/game/components/types.js`.
-- New `InventoryBar.js` (React) in [`App.js`](src/App.js).
-- Extend answer success handler to **append** reward (from POST response body, still **no answer**):
-
-```json
-{ "valid": true, "reward": { "type": "resistor", "instanceId": "..." } }
-```
-
-(Mock returns reward; real backend returns same shape.)
+- Implement **`checkCircuitFrontend(circuitVariantId, placed[])`** — **minimal** branching for each variant id you support in mock.
+- Add **large commented sections** for future RC / network math.
 
 **Acceptance criteria**
 
-- Solving a station adds a visible slot in inventory; reloading scene does not duplicate if you persist `heroStatus`/React state (define persistence in Phase 4 or localStorage stub).
+- **Q** shows pass/fail (or debug text) without calling server.
 
 **Dependencies**
 
-- Phase 2 POST response extended with optional `reward` when valid.
+- Phase 5.
 
 ---
 
-### Phase 4 — Placement: put components on the map
+### Phase 7 — `POST /validate-circuit-final` + victory UX
 
 **Goals**
 
-- Player selects an **inventory slot**, enters **place mode** (cursor ghost), confirms on a **valid cell**; Phaser spawns a **placed entity** snapped to grid.
-- **Rules:** no overlap on blocked tiles; max count per cell = 1 (or allow stack rules—document choice).
-- **Persistence:** placed entities included in `scene.restart` / save blob so teleports do not wipe the build (mirror how `heroStatus` is passed today).
+- Serialize **assembly**: full **`PlacedPart[]`** including **hashes** where applicable.
+- Mock returns `{ victory: true }` only for the “correct” mock assembly for that code + variant.
+- Victory overlay / scene.
 
-**Deliverables**
+**API**
 
-- Input flow: keybinding to open inventory focus, select item, **place** / **cancel**.
-- Placed object registry: `Map<cellKey, PlacedComponent>` or array with `{ x, y, instanceId, type, params }`.
-- Tiled: optional **placement mask** (object layer or tile property `place_allowed`).
-
-**Code touchpoints**
-
-- [`GameScene.js`](src/game/scenes/GameScene.js) — placement preview, confirm, spawn sprite/group.
-- [`utils.js`](src/game/utils.js) — snap world XY to grid (16px consistent with current map).
-- React: highlight selected inventory item.
-
-**API / mock**
-
-- Optional: `POST /api/placements` for audit—**not required** for offline contest MVP.
-
-**Acceptance criteria**
-
-- Place and see component on map; walk around; cannot place inside walls; picking **up** (if in scope) or **moving** can be Phase 4 stretch or Phase 5.
-
-**Dependencies**
-
-- Phase 3 inventory + art.
-
----
-
-### Phase 5 — Placed-component interaction (parameters and toggles)
-
-**Goals**
-
-- **E** on a **placed** component (not a station) opens a **small modal** or **in-world widget** to change **local state**:
-  - Resistor: cycle **R** through `{ 100, 1k, 10k }` (example).
-  - Switch: **boolean** on/off.
-  - Capacitor: discrete **C** values or “charged / discharged” if you keep it pedagogical not analog.
-- State changes fire events so React debug panel or Phaser can show current **circuit snapshot**.
-
-**Deliverables**
-
-- **Strategy table** per `type`: `onInteract(placedEntity)` dispatch.
-- **Snapshot structure** (for Phase 6), e.g.:
+- **`/validate-circuit-final`** body e.g.:
 
 ```json
 {
-  "nodes": [...],
-  "edges": [...],
-  "params": { "instanceId": { "rOhms": 1000, "closed": true } }
+  "accessCode": "DEMO2026",
+  "circuitVariantId": "variant_b_series_led",
+  "parts": [
+    {
+      "gridX": 3,
+      "gridY": 2,
+      "type": "resistor",
+      "variant": { "rOhms": 1000 },
+      "componentHash": "a1b2c3d4e5f67890",
+      "locked": false
+    }
+  ]
 }
 ```
 
-(Exact schema depends on whether you model **graph** or **slot puzzle**.)
-
-**Code touchpoints**
-
-- [`GameScene.js`](src/game/scenes/GameScene.js) — second overlap channel: `placedComponentsGroup` vs `station` triggers.
-- New React `ComponentTuneModal.js` or lightweight Phaser-only UI.
-
 **Acceptance criteria**
 
-- Each component type you ship in Phase 3 has defined behavior; unknown type no-ops safely.
+- Intentional wrong assembly → `victory: false`; right mock assembly → `victory: true` only from this POST.
 
 **Dependencies**
 
-- Phase 4 placed entities.
+- Phase 6.
 
 ---
 
-### Phase 6 — Circuit goal and win condition (mock → API)
+### Phase 8 — Real backend integration
 
 **Goals**
 
-- Define a **target circuit** (logical): required components, connections, and parameter windows.
-- **Validate** with **`POST /api/circuit/validate`** returning `{ "complete": true }` or `{ "complete": false }` plus optional **non-spoiler** hints (`"missingPower"`, `"wrongTopology"`).
-- **Win UX:** React overlay or `VictoryScene`; lock further edits or show “reset puzzle”.
-
-**Deliverables**
-
-- **Snapshot builder** from placed entities + adjacency (e.g. 4-neighbor on grid if “wire” connects cells, or explicit wire items between pins—**design choice** documented here when you pick it).
-- Mock validator that encodes **one** contest puzzle for demo day.
-
-**Code touchpoints**
-
-- New `src/game/circuit/buildSnapshot.js`, `src/game/circuit/mockValidate.js`.
-- `GameScene` — “Check circuit” button or automatic check on each state change (debounced).
-
-**API contract (illustrative)**
-
-```http
-POST /api/circuit/validate
-{ "snapshot": { ... } }
-```
-
-```json
-{ "complete": true }
-```
-
-**Acceptance criteria**
-
-- Intentionally wrong build → not complete; correct build → win; **no** leaked solution details in response.
+- Env-based base URL; swap **`mockContestBackend`** for `fetch` to production; error UI.
 
 **Dependencies**
 
-- Phase 5 snapshot.
+- Phase 7 contracts frozen.
 
 ---
 
-### Phase 7 — Real backend integration and hardening
+### Cross-cutting — Remove NPCs, enemies, combat for contest
 
 **Goals**
 
-- Swap `mockContestApi` base URL to production; env-based config.
-- **Auth/session** if contest requires per-team tokens (optional).
-- **Rate limiting / logging** on server; client handles offline errors gracefully.
+- `ContestGameScene` or `GAME_MODE === 'contest'`; hide **HeroHealth** / **HeroCoin**.
 
-**Deliverables**
+**Schedule**
 
-- `.env` / `REACT_APP_CONTEST_API_URL`.
-- Error states in UI (station fetch failed, validation timeout).
-
-**Acceptance criteria**
-
-- Same client build talks to mock or real server with only config change.
-
-**Dependencies**
-
-- Phases 2–6 contracts stabilized.
+- After Phase 1 or in parallel; before public demo.
 
 ---
 
-### Cross-cutting track — Remove NPCs, enemies, and combat from contest build
+## 6. Remaining minor TBDs (implementer choice)
 
-**Goals**
+These are **small**; resolve while coding:
 
-- Smaller bundle path and fewer accidental interactions during the event.
-
-**Deliverables**
-
-- Either **fork** `GameScene` into `ContestGameScene` registered in [`App.js`](src/App.js), or **`GAME_MODE === 'contest'`** guards skipping:
-  - `npcData`, `enemyData`, sword/push item dialogs, bush/box combat overlaps, `takeDamage` / `GameOverScene` triggers.
-- Hide [`HeroHealth`](src/game/HeroHealth.js) / [`HeroCoin`](src/game/HeroCoin.js) from [`App.js`](src/App.js) when in contest mode.
-
-**When to schedule**
-
-- Can start **after Phase 1** or in **parallel** with Phase 2; must finish before public demo to avoid confusion.
-
-**Acceptance criteria**
-
-- Playtest: no damage, no random NPCs blocking stations; teleports still work if your map uses them.
+- Exact **resistor/capacitor step sets** and default **variant** per type.
+- **Random slot** algorithm tie-break when multiple empty slots (use deterministic RNG from `accessCode` if you need reproducible demos).
+- Whether **Q** auto-opens a “submit to server” prompt or a separate **Enter** on a menu confirms **`/validate-circuit-final`**.
 
 ---
 
-## 5. Open design decisions (resolve before Phase 4–6 coding)
-
-Record your choices here as you decide:
-
-1. **Connection model:** implicit adjacency on grid vs explicit wire component vs node graph editor.
-2. **Single breadboard scene vs multi-room map** with carried inventory.
-3. **Inventory capacity** and whether **duplicate** component types allowed from multiple riddles.
-4. **Win per session** vs persistent leaderboard (out of scope unless added in Phase 7).
-
----
-
-## 6. Suggested timeline mental model
+## 7. Suggested timeline mental model
 
 | Phase | Rough focus |
 |-------|-------------|
-| 0 | Your map in Tiled + preload |
-| 1 | Feel of interact + riddle + mock POST |
-| 2 | Dynamic active stations = “backend shape” |
-| 3 | Inventory + component art |
-| 4 | Placement |
-| 5 | Tune placed parts |
-| 6 | Circuit validate + win |
-| 7 | Wire real API |
-
-Phases 3–5 are the **largest** unknowns because they depend on **how literally** you simulate electronics vs a **puzzle abstraction**.
+| 0 | Map + `stationId` + placement zone tiles |
+| 1 | Code + bootstrap + validate-answer + hash → inventory |
+| 2 | Config-only prompts / active set |
+| 3 | Art + 8-slot HUD + keys 1–8 |
+| 4 | Click place / right unplace + locked seeds |
+| 5 | E cycle variants |
+| 6 | Q + scaffold checks (math commented) |
+| 7 | validate-circuit-final mock + win |
+| 8 | Real API |
 
 ---
 
-## 7. Changelog (this document)
+## 8. Changelog (this document)
 
 | Date | Change |
 |------|--------|
 | 2026-04-06 | Initial phased spec from full problem statement; Phase 1 cross-linked to on-hold implementation plan. |
+| 2026-04-06 | Major revision: `stationId`; `/contest/bootstrap`, `/validate-answer`, `/validate-circuit-final`; 16-char hashes; six component types; 8 stackable slots + 1–8 keys; click place/unplace; E station vs E cycle; Q frontend check; localStorage state; multi-room single level; circuit as `PlacedPart[]`; mock file location; out-of-scope leaderboard. |
 
 Add a row whenever you change phase scope or API contracts.

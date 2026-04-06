@@ -1,33 +1,66 @@
 ---
 name: Contest riddle mini-game
-overview: Extend the existing Phaser + React template so map hotspots open a React popup (riddle text + optional answer field) on **E**, track correct answers across maps/teleports, and trigger a win when all required riddles are solved—while reusing the current overlap + modal-blocking pattern.
+overview: Phased contest work aligned with docs/CONTEST_GAME_PHASED_SPEC.md. Phase 0 = map/Tiled baseline only. Phase 1+ = bootstrap + validate-answer + RiddlePopup + mock backend (not the legacy riddleId + contestRiddles.json + win-all-riddles flow below).
 todos:
-  - id: data-manifest
-    content: Add contestRiddles.json (ids, prompts, acceptableAnswers, countsTowardWin) and helper to list required win ids
+  - id: phase-0-maps
+    content: "Phase 0: Contest map(s) — multi-room single level; actions objects use stationId; placement zone via contest_placeable tile property (or equivalent); preload in BootScene; MainMenuScene mapKey; optional docs/TILED_CONTEST.md legend"
     status: pending
-  - id: phaser-riddleId
-    content: "GameScene: E key + interactPressed; actions case riddleId; open-riddle event; heroStatus.solvedRiddleIds + teleport restart carry-over; win check + contest-won or VictoryScene"
+  - id: phase-1-bootstrap-api
+    content: "Phase 1 (spec): mockContestBackend.js — POST /contest/bootstrap + /validate-answer; access code UI; no contestRiddles.json as source of truth"
     status: pending
-  - id: react-riddle-popup
-    content: New RiddlePopup + App.js listeners (open-riddle, riddle-ui-closed); optional victory overlay and progress text
+  - id: phase-1-phaser-station
+    content: "Phase 1 (spec): GameScene — E key; actions case stationId (not riddleId); filter by activeStationIds from config; open-riddle with stationId + prompt from bootstrap"
     status: pending
-  - id: tiled-authoring
-    content: Place riddleId objects on contest map(s); set MainMenuScene start mapKey; BootScene imports if new maps
+  - id: phase-1-riddle-popup
+    content: "Phase 1 (spec): RiddlePopup calls /validate-answer; on valid append componentHash to inventory/localStorage per spec (not client-side acceptableAnswers list)"
     status: pending
-  - id: docs
-    content: Update docs/GAME_ARCHITECTURE.md with new events and Tiled property
+  - id: docs-architecture
+    content: Update docs/GAME_ARCHITECTURE.md with contest events, stationId, and pointer to CONTEST_GAME_PHASED_SPEC.md
     status: pending
 isProject: false
 ---
 
-# Contest mini-game: riddles, E to interact, win condition
+# Contest mini-game — implementation plan
 
-## Current behavior (baseline)
+**Source of truth for phases:** [docs/CONTEST_GAME_PHASED_SPEC.md](../../docs/CONTEST_GAME_PHASED_SPEC.md)
 
-- **Interact:** Overlap between `[heroActionCollider](src/game/scenes/GameScene.js)` and Tiled `actions` objects with property `**dialog`** (string = React dialog key). Trigger uses **Enter** (`JustDown(this.enterKey)`), not E.
-- **UI:** `[App.js](src/App.js)` listens for `new-dialog`, looks up static `dialogs[characterName]`, renders `[DialogBox](src/game/DialogBox.js)` (multi-page text only, no input).
-- **Blocking:** `isShowingDialog` in `GameScene` freezes movement/attack in `update()` until React fires `{characterName}-dialog-finished`.
-- **Persistence across maps:** `[scene.restart](src/game/scenes/GameScene.js)` passes a fresh `heroStatus` object (health, coin, flags, position). **Anything not included there is lost** on teleport—so solved riddles must be added to this payload (or equivalent `initData` field).
+This file started as a **riddle-only prototype** plan (`riddleId`, local `contestRiddles.json`, win when all riddles solved). The product spec has **superseded** that for Phase 1+ (bootstrap, `stationId`, `/validate-answer`, 16-char `componentHash`, `localStorage`, final win via `/validate-circuit-final`). **§Phase 0 below is authoritative for map work.** **§Appendix** keeps the old notes for reference only.
+
+---
+
+## Phase 0 — Map authoring and contest layout baseline
+
+**Must match** [CONTEST_GAME_PHASED_SPEC.md § Phase 0](../../docs/CONTEST_GAME_PHASED_SPEC.md).
+
+### Goals
+
+- **Multi-room, one level** — either linked Tiled maps + teleports (existing pattern) or one map with disjoint regions.
+- **Station markers** — object layer `**actions`**, custom property `**stationId**` (string, unique per kiosk). Do **not** use `riddleId` in new maps.
+- **Placement zone** — tiles (or layer) queryable in Phaser for “may place component here”, e.g. tile property `**contest_placeable: true`**, or an object layer you merge at runtime. Required before Phase 4 placement code; authoring happens in Phase 0.
+
+### Deliverables
+
+- Map JSON under `[src/game/assets/sprites/maps/](../../src/game/assets/sprites/maps/)`.
+- Import + `load.tilemapTiledJSON` in `[BootScene.js](../../src/game/scenes/BootScene.js)`.
+- `[MainMenuScene.js](../../src/game/scenes/MainMenuScene.js)` starts the contest entry `mapKey`.
+- Optional: short `[docs/TILED_CONTEST.md](../../docs/TILED_CONTEST.md)` or a subsection in the phased spec listing `stationId` + `contest_placeable` conventions.
+
+### Acceptance (Phase 0)
+
+- Game loads your layout; player walks intended bounds; **no** riddle UI required yet.
+- In code or a dev log, you can read `**contest_placeable`** (or chosen equivalent) for at least one tile in the build area.
+
+### Not in Phase 0
+
+- `POST /contest/bootstrap`, `/validate-answer`, `RiddlePopup`, inventory, placement input, circuit validation — those are **Phase 1+** per the phased spec.
+
+---
+
+## Current engine behavior (baseline)
+
+- **Interact today:** `[GameScene.js](../../src/game/scenes/GameScene.js)` — overlap `heroActionCollider` + `actions` objects; property `**dialog`** + **Enter**.
+- **UI:** `[App.js](../../src/App.js)` — `new-dialog` → static `dialogs` → `[DialogBox](../../src/game/DialogBox.js)`.
+- **Blocking:** `isShowingDialog` freezes movement until React finishes dialog.
 
 ```mermaid
 sequenceDiagram
@@ -44,168 +77,44 @@ sequenceDiagram
 
 ---
 
-## Target behavior
+## Appendix A — Legacy prototype (pre–phased spec)
 
-1. Player **roams** (existing grid movement unchanged).
-2. **Multiple interactables** on the map(s), authored in Tiled like today (object layer `actions`).
-3. **Press E** to interact when overlapping a hotspot (keep **Enter** as optional alias for accessibility unless you explicitly want E-only).
-4. **Popup** shows: riddle **text**; if the riddle has answers, show a **text field** + submit (and clear wrong-answer feedback).
-5. **Win:** When every **required** riddle has been answered correctly once, show a **victory** state (recommend React overlay first—fastest; optional Phaser `VictoryScene` later).
+The following described a **minimal** vertical slice **without** access code, **without** mock backend prompts, and **win = all riddles in JSON solved**. Use only if you intentionally defer the spec; otherwise implement **Phase 1** from [CONTEST_GAME_PHASED_SPEC.md](../../docs/CONTEST_GAME_PHASED_SPEC.md).
 
----
+### A.1 Old data model (superseded)
 
-## 1. Data model: riddles manifest (single source of truth)
+- ~~`contestRiddles.json`~~ with `acceptableAnswers` on client → **replaced by** server/mock `**POST /validate-answer`** (no answer in response).
 
-Add a JSON module (or TS if you migrate later), e.g. `[src/game/data/contestRiddles.json](src/game/data/contestRiddles.json)` (imported in React; optionally duplicated read in Phaser only if you validate server-side later—here client-only is fine).
+### A.2 Old Tiled property (superseded)
 
-**Suggested shape per riddle:**
+- ~~`riddleId`~~ → use `**stationId**`; prompts from `**/contest/bootstrap**`.
 
-- `id` (string): stable key referenced from Tiled.
-- `title` (optional): shown in popup header.
-- `prompt` (string): main riddle body (plain text; multiline OK).
-- `acceptableAnswers` (string[], optional): if **empty or omitted**, treat as **info-only** (no input; dismiss with button like current dialog).
-- `normalize` rules (in code, not JSON): trim, lowercase, collapse whitespace; optional strip punctuation for forgiving grading.
-- `countsTowardWin` (boolean, default `true` when `acceptableAnswers.length > 0`, else `false`): lets you add flavor text stations that do not block winning.
+### A.3 Old win condition (superseded)
 
-**Win set:** `requiredIds =` all riddle ids where `countsTowardWin === true` (or explicit `winRequires: string[]` at root of manifest—pick one approach and stick to it).
+- ~~Win when `solvedRiddleIds` covers manifest~~ → **win only via `POST /validate-circuit-final`** per spec; optional frontend **Q** check is non-authoritative.
 
----
-
-## 2. Tiled / map authoring
-
-**Option A (recommended):** New object property name to avoid colliding with old NPC-style `dialog`:
-
-- Property name: `**riddleId`** (string) = key into the manifest.
-
-Keep existing `**dialog`** objects working if you still need old signs/NPCs; new contest stations use `**riddleId**` only.
-
-**In `[GameScene.js](src/game/scenes/GameScene.js)`** `switch (name)` inside the `actions` loop, add:
-
-```js
-case 'riddleId': { /* same overlap + E/Enter as dialog, different event payload */ }
-```
-
-**Workflow for you:** In Tiled, place a 16×16 (or same size as current triggers) object on `actions`, add custom property `riddleId` = e.g. `resistor_riddle_01`. No need to paste riddle text into Tiled.
-
----
-
-## 3. Phaser: E key + event contract
-
-**Keys** in `GameScene.create()`:
-
-- Add `this.interactKey = this.input.keyboard.addKey(Input.Keyboard.KeyCodes.E)` (and optionally keep Enter for the same checks: `interactPressed = JustDown(eKey) || JustDown(enterKey)`).
-
-**Replace or parallel dialogs for riddles:**
-
-- Where `dialog` and NPC talk use `new-dialog`, riddles dispatch a **new** event, e.g. `**open-riddle`** with `detail: { riddleId }`.
-- React validates `riddleId` exists in manifest; if missing, log error and close.
-
-**Close / result events** (cleaner than per-id listener explosion):
-
-- `**riddle-ui-closed`** with `detail: { riddleId, outcome: 'correct' | 'dismissed' | 'wrong' }`
-  - `**correct`:** Phaser adds `riddleId` to `solvedRiddleIds`, marks this hotspot **solved** (see below), runs **win check**.
-  - `**dismissed`:** User closed info-only or gave up without solving (define whether dismiss on text-only counts as “seen”; usually N/A for win).
-  - `**wrong`:** Optional; Phaser may only need to clear `isShowingDialog`—no state change.
-
-Reuse the same `**isShowingDialog`** (or rename to `isModalOpen`) so movement stays blocked while the React popup is open. On `riddle-ui-closed`, same delayed `isShowingDialog = false` pattern as existing dialog listeners.
-
-**Per-hotspot “already solved”:**
-
-- Store `solvedRiddleIds` in `**heroStatus`** (e.g. `heroStatus.solvedRiddleIds: string[]`) initialized in `[MainMenuScene.js](src/game/scenes/MainMenuScene.js)` as `[]`.
-- On each `riddleId` object, you need a **unique instance id** if the same riddle could appear twice (unlikely). Simpler approach: **one riddle id per station**; solved = global for that id. If you need duplicate copies of the same question, add Tiled property `**riddleInstanceId`** and track solved pairs `(riddleId, instanceId)`—only add if your contest needs it.
-
-**Teleport / restart:** Extend every `heroStatus` construction in `[GameScene.js](src/game/scenes/GameScene.js)` `scene.restart` payload to include `solvedRiddleIds: [...this.solvedRiddleIds]` (read from a scene field you set from `init`).
-
----
-
-## 4. React: riddle popup component
-
-**New component** e.g. `[src/game/RiddlePopup.js](src/game/RiddlePopup.js)` (or `ContestRiddleModal.js`):
-
-- Props: `riddle` (manifest entry), `gameSize`, `onClose(outcome, extra?)`.
-- Layout: title, prompt (`Typography` or plain div with pixel font styles matching `[DialogBox](src/game/DialogBox.js)`).
-- If `acceptableAnswers?.length`:
-  - MUI `TextField` (variant outlined, fullWidth), **Submit** button.
-  - On submit: compare normalized input to normalized `acceptableAnswers`; if match → `onClose('correct')`; else show inline “Try again” (no Phaser event until close/submit as you prefer).
-- If no answers: single **OK** / **Close** → `onClose('dismissed')` (info kiosk).
-
-**Keyboard:**
-
-- **E** should **not** submit while typing if it re-triggers interact—use `stopPropagation` on keydown in the modal or ignore Phaser when document.activeElement is the input (Phaser still runs; the usual pattern is modal open = `isShowingDialog` so hero does not move; E in input is handled by browser). Optionally disable Phaser listening for E while modal open by checking a flag—simplest is rely on `isShowingDialog` and not binding E to Phaser actions while modal is open (interact only fires on overlap edge case: user holds E—use `JustDown` only).
-
-**App wiring** in `[App.js](src/App.js)`:
-
-- State: `activeRiddleId` (null | string) or `activeRiddle` object.
-- Listener: `open-riddle` → set state, lookup manifest.
-- On correct: dispatch `**riddle-ui-closed`** with outcome `correct` (Phaser updates).
-- Optional: global progress indicator in React (e.g. “3 / 7”) driven by events `riddle-progress` dispatched from Phaser whenever solved set changes (or compute in React if you pass solved count up—Phaser is source of truth for “authoritative” progress unless you lift state).
-
----
-
-## 5. Win condition
-
-**In Phaser** after adding an id to `solvedRiddleIds`:
-
-- `requiredIds` from manifest (import in Phaser **or** duplicate a small generated list—simplest: `import contestManifest from '../data/contestRiddles.json'` in `GameScene` if webpack JSON import is already supported—CRA does).
-- If `requiredIds.every(id => solvedRiddleIds.includes(id))` → **win**.
-
-**Win presentation (pick one):**
-
-1. **React victory overlay** (recommended first): dispatch `contest-won`; App shows full-screen message + “Play again” / link; Phaser can `scene.pause()` or set a flag to ignore input.
-2. **Phaser scene:** `scene.start('VictoryScene', { ... })` mirroring `[GameOverScene.js](src/game/scenes/GameOverScene.js)` menu pattern.
-
-Also **preload** `[BootScene.js](src/game/scenes/BootScene.js)` if you add only JSON—no change. If you add victory assets, load there.
-
----
-
-## 6. Optional simplifications for a contest build
-
-Not required for riddles, but often desirable:
-
-- **Disable combat / enemies / sword** for a puzzle-only walk: skip spawning from `enemyData`, or use a map without enemies; remove sword/push pickups from contest maps.
-- **Remove game over** or keep it irrelevant if no damage sources.
-- **Main menu** copy: retitle to contest name; “Start” begins at your contest map `mapKey`.
-
----
-
-## 7. Files to touch (checklist)
+### A.4 Old file checklist (superseded)
 
 
-| File                                                                                 | Changes                                                                                                  |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `[src/game/data/contestRiddles.json](src/game/data/contestRiddles.json)`             | New: all riddle definitions + win rules                                                                  |
-| `[src/game/RiddlePopup.js](src/game/RiddlePopup.js)`                                 | New: UI + validation                                                                                     |
-| `[src/App.js](src/App.js)`                                                           | State + `open-riddle` / `riddle-ui-closed` listeners; render `RiddlePopup`; optional victory UI          |
-| `[src/game/scenes/GameScene.js](src/game/scenes/GameScene.js)`                       | `E` key; `riddleId` case; `solvedRiddleIds` on `heroStatus`; teleport `restart` carries it; win dispatch |
-| `[src/game/scenes/MainMenuScene.js](src/game/scenes/MainMenuScene.js)`               | Initial `heroStatus.solvedRiddleIds = []`; set starting `mapKey` to contest map                          |
-| Tiled JSON under `[src/game/assets/sprites/maps/...](src/game/assets/sprites/maps/)` | Add `riddleId` objects; import map in BootScene if new file                                              |
-| `[docs/GAME_ARCHITECTURE.md](docs/GAME_ARCHITECTURE.md)`                             | Document new events + Tiled property                                                                     |
+| File                  | Old plan                        | Current spec                                        |
+| --------------------- | ------------------------------- | --------------------------------------------------- |
+| `contestRiddles.json` | Required                        | Not source of truth; mock backend module instead    |
+| `GameScene`           | `riddleId` case                 | `stationId` + active set from config                |
+| Win                   | `contest-won` after all riddles | `victory` after `/validate-circuit-final` (Phase 7) |
 
 
 ---
 
-## 8. Testing checklist
+## Appendix B — Optional contest build cleanup
 
-- Overlap + **E** opens popup; movement frozen.
-- Correct answer → popup closes, station cannot be “won” twice (either hide prompt or show “Completed”).
-- Wrong answer → stays open, message shown.
-- Info-only riddle → no input, dismiss works.
-- Teleport to another map and back → **solved list persists**.
-- Solve all required → win UI appears.
-- **Enter** still works if you keep dual-bind.
+- Disable NPCs, enemies, combat, bush/box, or use `ContestGameScene` / `GAME_MODE === 'contest'`.
+- Hide HeroHealth / HeroCoin in contest mode.
 
 ---
 
-## 9. Edge cases to decide (defaults suggested)
+## Appendix C — Testing ideas (post Phase 1)
 
+- Phase 0: load map, walk rooms, assert placement tiles flagged correctly (manual or dev overlay).
+- Phase 1: access code → bootstrap; E on active `stationId` only; validate-answer returns hash, never plaintext answer; reload restores from **localStorage** per spec.
 
-| Topic                           | Suggested default                        |
-| ------------------------------- | ---------------------------------------- |
-| Case sensitivity                | Case-insensitive                         |
-| Multiple acceptable spellings   | List in `acceptableAnswers`              |
-| Spaces / punctuation            | Normalize in code                        |
-| Player closes without answering | `dismissed` — does not add to solved     |
-| Same riddle id two places       | Avoid in maps, or add `instanceId` later |
-
-
-If you want **time limits** or **hint after N wrong tries**, add fields to manifest and state in `RiddlePopup`—out of scope unless you ask for it.
+If you want **time limits** or **hints after N wrong tries**, add fields to backend contract and `RiddlePopup`—not in baseline spec.
